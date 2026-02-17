@@ -1,0 +1,27 @@
+.menu-btn {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 1030;   /* ✅ FIXED */
+  background: rgba(255,255,255,0.25);
+  border: none;
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: #fff;
+  backdrop-filter: blur(10px);
+}
+
+.offcanvas {
+  background: rgba(20,10,40,0.95);
+  color: #fff;
+}
+
+.offcanvas a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.offcanvas a:hover {
+  color: #7e5bef;
+}

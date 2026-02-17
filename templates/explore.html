@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Explore | Cook & Connect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, rgba(43,16,85,0.85), rgba(126,91,239,0.85)),
+                  url('https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg') center/cover no-repeat;
+      color: #fff;
+    }
+
+    body.dark {
+      background: linear-gradient(135deg, rgba(18,18,18,0.9), rgba(43,16,85,0.85)),
+                  url('https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg') center/cover no-repeat;
+      color: #fff;
+    }
+
+    /* Trending cards */
+    .recipe-card {
+      width: 160px;
+      margin-right: 10px;
+      cursor: pointer;
+      transition: transform .2s;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+    }
+    .recipe-card:hover {
+      transform: scale(1.05);
+    }
+
+    .trending-container {
+      display: flex;
+      overflow-x: auto;
+      padding-bottom: 10px;
+    }
+    .trending-container::-webkit-scrollbar { display: none; }
+
+    .recipe-card img {
+      height: 120px;
+      object-fit: cover;
+    }
+    .suggested-img {
+      height: 140px;
+      object-fit: cover;
+      border-radius: 12px;
+    }
+    #modalImage {
+      height: 220px;
+      object-fit: cover;
+      border-radius: 12px;
+    }
+
+    .filter-btn {
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+    }
+
+    /* Bottom Nav */
+    nav {
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(15px);
+      box-shadow: 0 -5px 15px rgba(0,0,0,0.3);
+    }
+
+    nav a {
+      color: #fff;
+      font-weight: 500;
+      text-decoration: none;
+      margin: 0 8px;
+    }
+  </style>
+</head>
+
+<body>
+{% include 'navbar.html' %}
+
+<div class="container mt-4">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4>Explore Recipes</h4>
+    <button class="btn btn-outline-light" onclick="toggleDark()">🌙</button>
+  </div>
+
+  <!-- Search -->
+  <div class="mb-3 d-flex">
+    <input id="searchInput" class="form-control me-2" placeholder="Search recipes or ingredients">
+    <button class="btn btn-danger" onclick="searchRecipes()">Search</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="mb-3">
+    <button class="btn btn-outline-danger btn-sm filter-btn" onclick="filterCuisine('All')">All</button>
+    <button class="btn btn-outline-secondary btn-sm filter-btn" onclick="filterCuisine('Italian')">Italian</button>
+    <button class="btn btn-outline-secondary btn-sm filter-btn" onclick="filterCuisine('Indian')">Indian</button>
+    <button class="btn btn-outline-secondary btn-sm filter-btn" onclick="filterCuisine('Healthy')">Healthy</button>
+    <button class="btn btn-outline-secondary btn-sm filter-btn" onclick="filterCuisine('Dessert')">Dessert</button>
+  </div>
+
+  <!-- Trending -->
+  <h5>🔥 Trending Recipes</h5>
+  <div id="trending" class="trending-container mb-4"></div>
+
+  <!-- Suggested -->
+  <h5>🎯 Suggested For You</h5>
+  <div id="suggested" class="row g-3"></div>
+
+  <p id="emptyMsg" class="text-muted text-center mt-3" style="display:none;">
+    No recipes found 😕
+  </p>
+
+</div>
+
+<!-- Recipe Modal -->
+<div class="modal fade" id="recipeModal">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content bg-dark text-light">
+      <div class="modal-header">
+        <h5 id="modalTitle"></h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <img id="modalImage" class="img-fluid rounded mb-3">
+        <p class="text-muted">
+          ⏱ <span id="modalTime"></span> |
+          ⭐ <span id="modalLevel"></span> |
+          🥗 <span id="modalType"></span>
+        </p>
+        <h6>👩‍🍳 Cooking Instructions</h6>
+        <ol id="modalSteps"></ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Nav -->
+<nav class="fixed-bottom p-2 text-center">
+  <a href="/home">Home</a> |
+  <a href="/memories">Memories</a> |
+  <a href="/account">Account</a> |
+  <strong>Explore</strong>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const recipes = [
+  { name: "Pasta Carbonara", desc: "Creamy Italian pasta", cuisine: "Italian", time: "30 mins", level: "Medium", type: "Veg", trending: true, img: "https://images.unsplash.com/photo-1603133872878-684f6cba7f8f", steps: ["Boil pasta","Cook sauce","Mix together","Serve hot"] },
+  { name: "Paneer Butter Masala", desc: "Rich Indian curry", cuisine: "Indian", time: "35 mins", level: "Medium", type: "Veg", trending: true, img: "https://images.unsplash.com/photo-1604908554264-fb5f6b24c61d", steps: ["Prepare gravy","Add paneer","Simmer","Serve"] },
+  { name: "Vegetable Stir Fry", desc: "Quick and healthy", cuisine: "Healthy", time: "20 mins", level: "Easy", type: "Veg", trending: false, img: "https://images.unsplash.com/photo-1546069901-eacef0df6022", steps: ["Heat oil","Add vegetables","Stir fry","Serve"] },
+  { name: "Fruit Pizza", desc: "Sweet & refreshing", cuisine: "Dessert", time: "15 mins", level: "Easy", type: "Dessert", trending: false, img: "https://images.unsplash.com/photo-1627308595229-7830a5c91f9f", steps: ["Prepare base","Add cream","Top fruits","Chill"] }
+];
+
+function loadTrending() {
+  trending.innerHTML = "";
+  recipes.filter(r => r.trending).forEach(r => {
+    trending.innerHTML += `
+      <div class="card recipe-card" onclick="openRecipe('${r.name}')">
+        <img src="${r.img}" class="card-img-top">
+        <div class="card-body p-2">
+          <p class="small">${r.name}</p>
+        </div>
+      </div>`;
+  });
+}
+
+function loadSuggested(list) {
+  suggested.innerHTML = "";
+  emptyMsg.style.display = list.length ? "none" : "block";
+  list.forEach(r => {
+    suggested.innerHTML += `
+      <div class="col-12 col-md-4">
+        <div class="card h-100" onclick="openRecipe('${r.name}')">
+          <img src="${r.img}" class="card-img-top suggested-img">
+          <div class="card-body">
+            <h6>${r.name}</h6>
+            <p class="small">${r.desc}</p>
+            <small class="text-muted">⏱ ${r.time} | ⭐ ${r.level}</small>
+          </div>
+        </div>
+      </div>`;
+  });
+}
+
+function openRecipe(name) {
+  const r = recipes.find(x => x.name === name);
+  modalTitle.innerText = r.name;
+  modalImage.src = r.img;
+  modalTime.innerText = r.time;
+  modalLevel.innerText = r.level;
+  modalType.innerText = r.type;
+  modalSteps.innerHTML = "";
+  r.steps.forEach(s => modalSteps.innerHTML += `<li>${s}</li>`);
+  new bootstrap.Modal(recipeModal).show();
+}
+
+function searchRecipes() {
+  const q = searchInput.value.toLowerCase();
+  loadSuggested(recipes.filter(r => r.name.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q)));
+}
+
+function filterCuisine(type) {
+  loadSuggested(type === "All" ? recipes : recipes.filter(r => r.cuisine === type));
+}
+
+function toggleDark() { document.body.classList.toggle("dark"); }
+
+window.onload = () => { loadTrending(); loadSuggested(recipes); };
+</script>
+
+</body>
+</html>
