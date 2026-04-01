@@ -6,7 +6,8 @@ from werkzeug.utils import secure_filename
 
 import os, json
 from ultralytics import YOLO
-
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 from datetime import datetime
 from collections import Counter
 
@@ -58,20 +59,38 @@ class User(db.Model):
     profile_pic = db.Column(db.String(200), default="default.png")
     diet = db.Column(db.String(30), default="Veg 🌱")
     cuisines = db.Column(db.String(200), default="Indian 🇮🇳")
+class Memory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    name = db.Column(db.String(100))
+    calories = db.Column(db.Integer)
+    ingredients = db.Column(db.Text)
+    image = db.Column(db.String(200))
+    note = db.Column(db.Text)
+    cooked_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # ✅ ADD THIS LINE
+    likes = db.relationship('Like', backref='memory', cascade="all, delete")
+
+
+class Friend(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    status = db.Column(db.String(20), default="pending")
+
+class Like(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    memory_id = db.Column(db.Integer, db.ForeignKey('memory.id'))
 # ================= LOAD AI =================
-yolo_model = None
+print("🚀 Loading YOLOv8...")
+yolo_model = YOLO("yolov8n.pt")
+print("✅ YOLO Loaded")
 
-def get_yolo_model():
-    global yolo_model
-    if yolo_model is None:
-        print("Loading YOLO...")
-        yolo_model = YOLO("yolov8n.pt")
-        print("YOLO Loaded")
-    return yolo_model
-
-
-
+device = "cpu"
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
+model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125M").to(device)
 
 # ================= LOAD RECIPES =================
 with open("recipes.json", "r", encoding="utf-8") as f:
@@ -152,18 +171,15 @@ def home():
         return redirect(url_for('login_page'))
     return render_template("home.html")
 
-@app.route('/explore')
-def explore():
-    if 'user_id' not in session:
-        return redirect(url_for('login_page'))
-    return render_template("explore.html")
+
 
 @app.route('/account')
 def account():
     if 'user_id' not in session:
         return redirect(url_for('login_page'))
-    user = User.query.get(session['user_id'])
-    return render_template("account.html", user=user)
+
+    return redirect(url_for('view_profile', user_id=session["user_id"]))
+
 
 @app.route('/recipe')
 def recipe_page():
@@ -180,6 +196,12 @@ def memories_page():
 @app.route('/analytics-page')
 def analytics_page():
     return render_template("analytics.html")
+@app.route('/friends-page')
+def friends_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+    return render_template("friends.html")
+
 
 @app.route('/logout')
 def logout():
@@ -231,7 +253,7 @@ def detect_ingredients():
     path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(path)
 
-    results = get_yolo_model()(path, conf=0.01)
+    results = yolo_model(path, conf=0.01)
     detected = []
 
     for r in results:
@@ -323,64 +345,85 @@ def save_memory():
     note = request.form.get("note")
 
     if ingredients:
-        ingredients = json.loads(ingredients)
+        ingredients = json.dumps(json.loads(ingredients))
 
     image = request.files.get("image")
 
-    # 🔴 If no image uploaded → reject
     if not image or image.filename == "":
         return jsonify({"error": "Image is required"}), 400
 
     os.makedirs("static/uploads", exist_ok=True)
 
-    # Make filename unique using timestamp
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     filename = f"{timestamp}_{secure_filename(image.filename)}"
     filepath = os.path.join("static/uploads", filename)
     image.save(filepath)
 
-    image_url = f"/static/uploads/{filename}"
+    new_memory = Memory(
+        user_id=session["user_id"],
+        name=name,
+        calories=int(calories),
+        ingredients=ingredients,
+        image=f"/static/uploads/{filename}",
+        note=note,
+        cooked_at=datetime.now()
+    )
 
-    # Real time
-    cooked_time = datetime.now().strftime("%d %b %Y, %I:%M %p")
-
-    memories = session.get("memories", [])
-
-    memories.append({
-        "name": name,
-        "calories": calories,
-        "ingredients": ingredients,
-        "image": image_url,
-        "note": note,
-        "cooked_at": cooked_time
-    })
-
-    session["memories"] = memories
+    db.session.add(new_memory)
+    db.session.commit()
 
     return jsonify({"message": "Saved"})
+
 @app.route("/get-memories")
 def get_memories():
+
     if "user_id" not in session:
         return jsonify([])
-    return jsonify(session.get("memories", []))
+
+    memories = Memory.query.filter_by(
+        user_id=session["user_id"]
+    ).order_by(Memory.cooked_at.desc()).all()
+
+    result = []
+
+    for m in memories:
+        result.append({
+            "id": m.id,
+            "name": m.name,
+            "calories": m.calories,
+            "ingredients": json.loads(m.ingredients) if m.ingredients else [],
+            "image": m.image,
+            "note": m.note,
+            "cooked_at": m.cooked_at.strftime("%d %b %Y, %I:%M %p") if m.cooked_at else "",
+            "likes": len(m.likes)   # 🔥 IMPORTANT
+        })
+
+    return jsonify(result)
+
+
 
 @app.route("/delete-memory", methods=["POST"])
 def delete_memory():
     if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
-    index = request.json.get("index")
-    memories = session.get("memories", [])
+    memory_id = request.json.get("id")
 
-    if 0 <= index < len(memories):
-        memories.pop(len(memories) - 1 - index)
+    memory = Memory.query.filter_by(
+        id=memory_id,
+        user_id=session["user_id"]
+    ).first()
 
-    session["memories"] = memories
+    if memory:
+        db.session.delete(memory)
+        db.session.commit()
+
     return jsonify({"message": "Deleted"})
+
 
 @app.route("/analytics-data")
 def analytics_data():
-    if "memories" not in session:
+    if "user_id" not in session:
         return jsonify({
             "totalCalories": 0,
             "totalRecipes": 0,
@@ -390,54 +433,226 @@ def analytics_data():
             "ingredientCounts": []
         })
 
-    memories = session["memories"]
+    memories = Memory.query.filter_by(user_id=session["user_id"]).all()
 
     total_calories = 0
     ingredient_counter = Counter()
-    weekly_calories = [0]*7  # Mon-Sun
+    weekly_calories = [0]*7
 
     for mem in memories:
-        # Calories
-        try:
-            cal = int(mem.get("calories", 0))
-        except:
-            cal = 0
-
+        cal = mem.calories or 0
         total_calories += cal
 
-        # Weekly grouping
-        cooked_time = mem.get("cooked_at")
-        if cooked_time:
-            dt = datetime.strptime(cooked_time, "%d %b %Y, %I:%M %p")
-            weekday = dt.weekday()  # Monday=0
+        if mem.cooked_at:
+            weekday = mem.cooked_at.weekday()
             weekly_calories[weekday] += cal
 
-        # Ingredients count
-        ingredients = mem.get("ingredients", [])
+        ingredients = json.loads(mem.ingredients)
         for ing in ingredients:
             ingredient_counter[ing] += 1
 
     top_ingredient = ingredient_counter.most_common(1)
     top_ingredient = top_ingredient[0][0] if top_ingredient else "-"
 
-    labels = list(ingredient_counter.keys())
-    counts = list(ingredient_counter.values())
-
     return jsonify({
         "totalCalories": total_calories,
         "totalRecipes": len(memories),
         "topIngredient": top_ingredient,
         "weeklyCalories": weekly_calories,
-        "ingredientLabels": labels,
-        "ingredientCounts": counts
+        "ingredientLabels": list(ingredient_counter.keys()),
+        "ingredientCounts": list(ingredient_counter.values())
     })
 
 
-# ================= RUN =================
-import os
+@app.route("/search-users")
+def search_users():
+    if "user_id" not in session:
+        return jsonify([])
 
+    query = request.args.get("q")
+    if not query:
+        return jsonify([])
+
+    users = User.query.filter(User.name.ilike(f"%{query}%")).all()
+
+    return jsonify([
+        {"id": u.id, "name": u.name, "email": u.email}
+        for u in users if u.id != session["user_id"]
+    ])
+
+@app.route("/send-request", methods=["POST"])
+def send_request():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    sender = session["user_id"]
+    receiver = request.json.get("receiver_id")
+
+    if sender == receiver:
+        return jsonify({"error": "Cannot send request to yourself"}), 400
+
+    existing = Friend.query.filter(
+        ((Friend.sender_id == sender) & (Friend.receiver_id == receiver)) |
+        ((Friend.sender_id == receiver) & (Friend.receiver_id == sender))
+    ).first()
+
+    if existing:
+        return jsonify({"message": "Request already exists"})
+
+    friend = Friend(sender_id=sender, receiver_id=receiver)
+    db.session.add(friend)
+    db.session.commit()
+
+    return jsonify({"message": "Request Sent"})
+
+@app.route("/accept-request", methods=["POST"])
+def accept_request():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    request_id = request.json.get("request_id")
+    friend = Friend.query.get(request_id)
+
+    if friend and friend.receiver_id == session["user_id"]:
+        friend.status = "accepted"
+        db.session.commit()
+
+    return jsonify({"message": "Friend Added"})
+
+@app.route("/friend-requests")
+def friend_requests():
+    if "user_id" not in session:
+        return jsonify([])
+
+    user_id = session["user_id"]
+
+    requests = Friend.query.filter_by(
+        receiver_id=user_id,
+        status="pending"
+    ).all()
+
+    return jsonify([
+        {
+            "request_id": r.id,
+            "name": User.query.get(r.sender_id).name
+        }
+        for r in requests
+    ])
+
+
+
+@app.route("/my-friends")
+def my_friends():
+    if "user_id" not in session:
+        return jsonify([])
+
+    user_id = session["user_id"]
+
+    friends = Friend.query.filter(
+        ((Friend.sender_id == user_id) |
+         (Friend.receiver_id == user_id)) &
+        (Friend.status == "accepted")
+    ).all()
+
+    friend_ids = [
+        f.receiver_id if f.sender_id == user_id else f.sender_id
+        for f in friends
+    ]
+
+    users = User.query.filter(User.id.in_(friend_ids)).all()
+
+    return jsonify([
+        {"id": u.id, "name": u.name}
+        for u in users
+    ])
+
+@app.route("/profile/<int:user_id>")
+def view_profile(user_id):
+
+    if "user_id" not in session:
+        return redirect(url_for("login_page"))
+
+    user = User.query.get_or_404(user_id)
+
+    memories = Memory.query.filter_by(
+        user_id=user_id
+    ).order_by(Memory.cooked_at.desc()).all()
+
+    friend_count = Friend.query.filter(
+        ((Friend.sender_id == user_id) |
+         (Friend.receiver_id == user_id)) &
+        (Friend.status == "accepted")
+    ).count()
+
+    # If viewing own profile
+    if user_id == session["user_id"]:
+        return render_template(
+            "account.html",
+            user=user,
+            memories=memories,
+            viewing_self=True,
+            friend_count=friend_count
+        )
+
+    # If viewing friend's profile
+    return render_template(
+        "friend_profile.html",
+        friend=user,
+        memories=memories,
+        friend_count=friend_count
+    )
+
+
+@app.route("/toggle-like/<int:memory_id>", methods=["POST"])
+def toggle_like(memory_id):
+
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    existing = Like.query.filter_by(
+        user_id=session["user_id"],
+        memory_id=memory_id
+    ).first()
+
+    if existing:
+        db.session.delete(existing)
+    else:
+        like = Like(
+            user_id=session["user_id"],
+            memory_id=memory_id
+        )
+        db.session.add(like)
+
+    db.session.commit()
+    return jsonify({"status": "ok"})
+@app.route('/upload-profile-pic', methods=['POST'])
+def upload_profile_pic():
+    if "user_id" not in session:
+        return "Unauthorized", 401
+
+    file = request.files.get("image")
+    if not file or file.filename == "":
+        return "No file selected", 400
+
+    filename = secure_filename(file.filename)
+
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+
+    user = User.query.get(session["user_id"])
+    user.profile_pic = filename
+    db.session.commit()
+
+    return "Success", 200
+# ================= RUN =================
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+
+    app.run(
+        host="0.0.0.0",   # Allow access from other devices
+        port=5000,
+        debug=True
+    )

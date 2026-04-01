@@ -38,12 +38,25 @@ h2{
   transform: scale(1.02);
 }
 
-.memory-img{
+.memory-img-box{
   width:100%;
-  max-height:250px;
-  object-fit:cover;
+  height:260px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  overflow:hidden;
   border-radius:15px;
   margin-bottom:15px;
+  background:#000;
+}
+
+.memory-img{
+  max-width:100%;
+  max-height:100%;
+  object-fit:contain;
+}
+.memory-img:hover{
+  transform: scale(1.03);
 }
 
 .delete-btn{
@@ -64,6 +77,40 @@ h2{
   font-style: italic;
   opacity:0.9;
 }
+.memories-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+  gap:25px;
+  max-width:1100px;
+  margin:auto;
+}
+
+.memory-card{
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(20px);
+  border-radius:20px;
+  padding:15px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.3);
+  transition:transform 0.3s ease;
+}
+
+.memory-card:hover{
+  transform:scale(1.03);
+}
+
+.memory-img-box{
+  width:100%;
+  height:160px;
+  overflow:hidden;
+  border-radius:12px;
+  margin-bottom:10px;
+}
+
+.memory-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
 </style>
 </head>
 <body>
@@ -75,7 +122,7 @@ h2{
   <input type="text" id="searchMemory" class="form-control" placeholder="Search memories...">
 </div>
 
-<div id="memoriesList"></div>
+<div id="memoriesList" class="memories-grid"></div>
 
 <script>
 function loadMemories(){
@@ -91,14 +138,17 @@ function loadMemories(){
       return;
     }
 
-    // Show latest first
-    memories.slice().reverse().forEach((m,index) => {
+    memories.forEach((m) => {
 
       list.innerHTML += `
         <div class="memory-card">
-          <i class="bi bi-trash delete-btn" onclick="deleteMemory(${index})"></i>
+          <i class="bi bi-trash delete-btn" onclick="deleteMemory(${m.id})"></i>
 
-          ${m.image ? `<img src="${m.image}" class="memory-img">` : ""}
+         ${m.image ? `
+<div class="memory-img-box">
+   <img src="${m.image}" class="memory-img">
+</div>
+` : ""}
 
           <h4>${m.name}</h4>
           <p>🔥 ${m.calories} kcal</p>
@@ -107,17 +157,25 @@ function loadMemories(){
           ${m.note ? `<p class="note-text">📝 ${m.note}</p>` : ""}
 
           <small>📅 ${m.cooked_at || ""}</small>
+
+          <hr>
+
+          <!-- LIKE COUNT -->
+          <div>
+            ❤️ ${m.likes || 0}
+          </div>
+
         </div>
       `;
     });
   });
 }
 
-function deleteMemory(index){
+function deleteMemory(id){
   fetch("/delete-memory",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({index:index})
+    body:JSON.stringify({id:id})
   }).then(()=>loadMemories());
 }
 
@@ -132,7 +190,6 @@ document.getElementById("searchMemory").addEventListener("input", function(){
 });
 
 loadMemories();
-
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
